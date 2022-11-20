@@ -1,3 +1,4 @@
+import math
 import os
 import time
 import torch
@@ -13,6 +14,8 @@ from datasets.data_loader import get_loaders
 from datasets.dataset_config import dataset_config
 from last_layer_analysis import last_layer_analysis
 from networks import tvmodels, allmodels, set_tvmodel_head_var
+
+from cls_analysis import analyze_cls, analyze_focus, analyze_heads
 
 
 def main(argv=None):
@@ -37,6 +40,8 @@ def main(argv=None):
                         help='Plot last layer analysis (default=%(default)s)')
     parser.add_argument('--no-cudnn-deterministic', action='store_true',
                         help='Disable CUDNN deterministic (default=%(default)s)')
+    parser.add_argument('--cls-analysis', action='store_true',
+                        help='Save data for cls analysis (default=%(default)s)')
     # dataset args
     parser.add_argument('--datasets', default=['cifar100'], type=str, choices=list(dataset_config.keys()),
                         help='Dataset or datasets used (default=%(default)s)', nargs='+', metavar="DATASET")
@@ -94,13 +99,14 @@ def main(argv=None):
     parser.add_argument('--gridsearch-tasks', default=-1, type=int,
                         help='Number of tasks to apply GridSearch (-1: all tasks) (default=%(default)s)')
 
+
     # Args -- Incremental Learning Framework
     args, extra_args = parser.parse_known_args(argv)
     args.results_path = os.path.expanduser(args.results_path)
     base_kwargs = dict(nepochs=args.nepochs, lr=args.lr, lr_min=args.lr_min, lr_factor=args.lr_factor,
                        lr_patience=args.lr_patience, clipgrad=args.clipping, momentum=args.momentum,
                        wd=args.weight_decay, multi_softmax=args.multi_softmax, wu_nepochs=args.warmup_nepochs,
-                       wu_lr_factor=args.warmup_lr_factor, fix_bn=args.fix_bn, eval_on_train=args.eval_on_train)
+                       wu_lr_factor=args.warmup_lr_factor, fix_bn=args.fix_bn, eval_on_train=args.eval_on_train)#, mu=args.mu)
 
     if args.no_cudnn_deterministic:
         print('WARNING: CUDNN Deterministic will be disabled.')
@@ -138,7 +144,7 @@ def main(argv=None):
     else:  # other models declared in networks package's init
         net = getattr(importlib.import_module(name='networks'), args.network)
         # WARNING: fixed to pretrained False for other model (non-torchvision)
-        init_model = net(pretrained=False)
+        init_model = net(pretrained=args.pretrained)
 
     # Args -- Continual Learning Approach
     from approach.incremental_learning import Inc_Learning_Appr
@@ -224,6 +230,7 @@ def main(argv=None):
     acc_tag = np.zeros((max_task, max_task))
     forg_taw = np.zeros((max_task, max_task))
     forg_tag = np.zeros((max_task, max_task))
+
     for t, (_, ncla) in enumerate(taskcla):
         # Early stop tasks if flag
         if t >= max_task:
@@ -237,6 +244,13 @@ def main(argv=None):
         net.add_head(taskcla[t][1])
         net.to(device)
 
+        if 'olwf_asym' in args.approach:
+            appr._task_size = ncla
+            appr._n_classes += ncla
+
+        if 'contrastive_fc' in args.approach:
+            appr._n_classes += ncla
+        
         # GridSearch
         if t < args.gridsearch_tasks:
 
@@ -264,6 +278,9 @@ def main(argv=None):
         appr.train(t, trn_loader[t], val_loader[t])
         print('-' * 108)
 
+        list_cls = []
+        list_tgs = []
+        list_focuses = []
         # Test
         for u in range(t + 1):
             test_loss, acc_taw[t, u], acc_tag[t, u] = appr.eval(u, tst_loader[u])
@@ -274,11 +291,44 @@ def main(argv=None):
                   '| TAg acc={:5.1f}%, forg={:5.1f}% <<<'.format(u, test_loss,
                                                                  100 * acc_taw[t, u], 100 * forg_taw[t, u],
                                                                  100 * acc_tag[t, u], 100 * forg_tag[t, u]))
+
+
             logger.log_scalar(task=t, iter=u, name='loss', group='test', value=test_loss)
             logger.log_scalar(task=t, iter=u, name='acc_taw', group='test', value=100 * acc_taw[t, u])
             logger.log_scalar(task=t, iter=u, name='acc_tag', group='test', value=100 * acc_tag[t, u])
             logger.log_scalar(task=t, iter=u, name='forg_taw', group='test', value=100 * forg_taw[t, u])
             logger.log_scalar(task=t, iter=u, name='forg_tag', group='test', value=100 * forg_tag[t, u])
+
+            # Log the cls representation for the test set.
+            if args.cls_analysis:
+                if 'contrastive' in args.approach:
+                    cls, targets = analyze_cls(model=net, device=device, test_loader=tst_loader[u], contrastive = True)
+                else:
+                    cls, targets = analyze_cls(model=net, device=device, test_loader=tst_loader[u], contrastive = False)
+                    
+                list_cls.append(cls)
+                list_tgs.append(targets)
+        
+        
+
+        if args.cls_analysis:
+            out_shape = len(list_cls[0][0])
+            list_cls = np.array([elem for sl in list_cls for elem in sl]).reshape(-1, out_shape)
+            list_tgs = np.array([elem for sl in list_tgs for elem in sl]).reshape(-1, 1)
+            logger.log_result(list_cls, name='cls'+str(t), step=t)
+            logger.log_result(list_tgs, name='targets'+str(t), step=t)
+
+            if 'contrastive_fc' in args.approach:
+                focuses = analyze_focus(model=net, n_classes=appr._n_classes)
+                list_focuses.append(focuses)
+                out_shape = len(list_focuses[0][0])
+                list_focuses = np.array([elem for sl in list_focuses for elem in sl]).reshape(-1, out_shape)
+                logger.log_result(list_focuses, name='focuses'+str(t), step=t)
+
+        
+
+
+                
 
         # Save
         print('Save at ' + os.path.join(args.results_path, full_exp_name))
@@ -293,6 +343,7 @@ def main(argv=None):
         logger.log_result((acc_taw * aux).sum(1) / aux.sum(1), name="wavg_accs_taw", step=t)
         logger.log_result((acc_tag * aux).sum(1) / aux.sum(1), name="wavg_accs_tag", step=t)
 
+
         # Last layer analysis
         if args.last_layer_analysis:
             weights, biases = last_layer_analysis(net.heads, t, taskcla, y_lim=True)
@@ -303,6 +354,11 @@ def main(argv=None):
             weights, biases = last_layer_analysis(net.heads, t, taskcla, y_lim=True, sort_weights=True)
             logger.log_figure(name='weights', iter=t, figure=weights)
             logger.log_figure(name='bias', iter=t, figure=biases)
+
+    if args.cls_analysis:
+        weight_list = analyze_heads(model=net)
+        logger.log_result(weight_list, name='heads', step=t)
+        
     # Print Summary
     utils.print_summary(acc_taw, acc_tag, forg_taw, forg_tag)
     print('[Elapsed time = {:.1f} h]'.format((time.time() - tstart) / (60 * 60)))
