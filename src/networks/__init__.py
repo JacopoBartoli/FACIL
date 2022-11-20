@@ -18,7 +18,7 @@ tvmodels = ['alexnet',
             'wide_resnet50_2', 'wide_resnet101_2'
             ]
 
-allmodels = tvmodels + ['resnet32', 'LeNet', 'VggNet', 'cct']
+allmodels = tvmodels + ['resnet32', 'LeNet', 'VggNet', 'compact_convolutional_transformer']
 
 
 def set_tvmodel_head_var(model):
