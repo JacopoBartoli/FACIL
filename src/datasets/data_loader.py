@@ -4,10 +4,12 @@ from torch.utils import data
 import torchvision.transforms as transforms
 from torchvision.datasets import MNIST as TorchVisionMNIST
 from torchvision.datasets import CIFAR100 as TorchVisionCIFAR100
+from torchvision.datasets import CIFAR10 as TorchVisionCIFAR10
 from torchvision.datasets import SVHN as TorchVisionSVHN
 
 from . import base_dataset as basedat
 from . import memory_dataset as memd
+from . import contrastive_memory_dataset as cmemd
 from .dataset_config import dataset_config
 
 
@@ -27,7 +29,10 @@ def get_loaders(datasets, num_tasks, nc_first_task, batch_size, num_workers, pin
                                                       crop=dc['crop'],
                                                       flip=dc['flip'],
                                                       normalize=dc['normalize'],
-                                                      extend_channel=dc['extend_channel'])
+                                                      extend_channel=dc['extend_channel'],
+                                                      random_grayscale=dc['random_grayscale'],
+                                                      random_jitter_p=dc['random_jitter_p'],
+                                                      gaussian_blur=dc['gaussian_blur'])
 
         # datasets
         trn_dset, val_dset, tst_dset, curtaskcla = get_datasets(cur_dataset, dc['path'], num_tasks, nc_first_task,
@@ -77,6 +82,31 @@ def get_datasets(dataset, path, num_tasks, nc_first_task, validation, trn_transf
                                                          shuffle_classes=class_order is None, class_order=class_order)
         # set dataset type
         Dataset = memd.MemoryDataset
+
+    elif 'cifar10' == dataset:
+        tvcifar_trn = TorchVisionCIFAR10(path, train=True, download=True)
+        tvcifar_tst = TorchVisionCIFAR10(path, train=False, download=True)
+        trn_data = {'x': tvcifar_trn.data, 'y': tvcifar_trn.targets}
+        tst_data = {'x': tvcifar_tst.data, 'y': tvcifar_tst.targets}
+        # compute splits
+        all_data, taskcla, class_indices = memd.get_data(trn_data, tst_data, validation=validation,
+                                                         num_tasks=num_tasks, nc_first_task=nc_first_task,
+                                                         shuffle_classes=class_order is None, class_order=class_order)
+        # set dataset type
+        Dataset = memd.MemoryDataset
+    
+    elif 'cifar100_contrastive' == dataset:
+        tvcifar_trn = TorchVisionCIFAR100(path, train=True, download=True)
+        tvcifar_tst = TorchVisionCIFAR100(path, train=False, download=True)
+        trn_data = {'x': tvcifar_trn.data, 'y': tvcifar_trn.targets}
+        tst_data = {'x': tvcifar_tst.data, 'y': tvcifar_tst.targets}
+        # compute splits
+        all_data, taskcla, class_indices = cmemd.get_data(trn_data, tst_data, validation=validation,
+                                                         num_tasks=num_tasks, nc_first_task=nc_first_task,
+                                                         shuffle_classes=class_order is None, class_order=class_order)
+        # set dataset type
+        Dataset = cmemd.ContrastiveMemoryDataset
+
 
     elif 'cifar100' in dataset:
         tvcifar_trn = TorchVisionCIFAR100(path, train=True, download=True)
@@ -156,7 +186,7 @@ def get_datasets(dataset, path, num_tasks, nc_first_task, validation, trn_transf
     return trn_dset, val_dset, tst_dset, taskcla
 
 
-def get_transforms(resize, pad, crop, flip, normalize, extend_channel):
+def get_transforms(resize, pad, crop, flip, normalize, extend_channel, random_grayscale, random_jitter_p, gaussian_blur):
     """Unpack transformations and apply to train or test splits"""
 
     trn_transform_list = []
@@ -177,6 +207,19 @@ def get_transforms(resize, pad, crop, flip, normalize, extend_channel):
         trn_transform_list.append(transforms.RandomResizedCrop(crop))
         tst_transform_list.append(transforms.CenterCrop(crop))
 
+    # random grayscale
+    if random_grayscale is not None:
+        trn_transform_list.append(transforms.RandomGrayscale(p=random_grayscale))
+
+    # gaussian blur
+    if gaussian_blur is not None:
+        trn_transform_list.append(transforms.GaussianBlur(kernel_size=gaussian_blur))
+
+    if random_jitter_p is not None:
+        trn_transform_list.append(transforms.RandomApply([transforms.ColorJitter(brightness=0.5,
+                                        contrast=0.5,
+                                        saturation=0.5,
+                                        hue=0.1)], random_jitter_p))
     # flips
     if flip:
         trn_transform_list.append(transforms.RandomHorizontalFlip())

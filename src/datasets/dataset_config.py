@@ -1,6 +1,6 @@
 from os.path import join
 
-_BASE_DATA_PATH = "../data"
+_BASE_DATA_PATH = "../data/"
 
 dataset_config = {
     'mnist': {
@@ -18,8 +18,35 @@ dataset_config = {
         'flip': False,
         'normalize': ((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
     },
+    'cifar100_224': {
+        'path': join(_BASE_DATA_PATH, 'cifar100'),
+        'resize': 224,
+        'pad': 4,
+        'crop': 224,
+        'flip': True,
+        'normalize': ((0.5071, 0.4866, 0.4409), (0.2009, 0.1984, 0.2023))
+    },
     'cifar100': {
         'path': join(_BASE_DATA_PATH, 'cifar100'),
+        'resize': None,
+        'pad': 4,
+        'crop': 32,
+        'flip': True,
+        'normalize': ((0.5071, 0.4866, 0.4409), (0.2009, 0.1984, 0.2023))
+    },
+    'cifar100_contrastive': {
+        'path': join(_BASE_DATA_PATH, 'cifar100'),
+        'resize': None,
+        'pad': 4,
+        'crop': 32,
+        'flip': True,
+        'random_grayscale': 0.2,
+        'gaussian_blur': 3,
+        'random_jitter_p': 0.8,
+        'normalize': ((0.5071, 0.4866, 0.4409), (0.2009, 0.1984, 0.2023))
+    },
+    'cifar10': {
+        'path': join(_BASE_DATA_PATH, 'cifar10'),
         'resize': None,
         'pad': 4,
         'crop': 32,
@@ -94,7 +121,7 @@ dataset_config = {
 
 # Add missing keys:
 for dset in dataset_config.keys():
-    for k in ['resize', 'pad', 'crop', 'normalize', 'class_order', 'extend_channel']:
+    for k in ['resize', 'pad', 'crop', 'normalize', 'class_order', 'extend_channel','random_grayscale', 'gaussian_blur', 'random_jitter_p']:
         if k not in dataset_config[dset].keys():
             dataset_config[dset][k] = None
     if 'flip' not in dataset_config[dset].keys():

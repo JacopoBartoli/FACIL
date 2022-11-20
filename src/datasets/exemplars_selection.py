@@ -81,6 +81,51 @@ class RandomExemplarsSelector(ExemplarsSelector):
             raise RuntimeError("Unsupported dataset: {}".format(sel_loader.dataset.__class__.__name__))
         return labels
 
+class ContrastiveRandomExemplarsSelector(ExemplarsSelector):
+    """Selection of new samples. This is based on random selection, which produces a random list of samples."""
+
+    def __init__(self, exemplars_dataset):
+        super().__init__(exemplars_dataset)
+
+    def _select_indices(self, model: LLL_Net, sel_loader: DataLoader, exemplars_per_class: int, transform) -> Iterable:
+        num_cls = sum(model.task_cls)
+        result = []
+        labels = self._get_labels(sel_loader)
+        for curr_cls in range(num_cls):
+            # get all indices from current class -- check if there are exemplars from previous task in the loader
+            cls_ind = np.where(labels == curr_cls)[0]
+            assert (len(cls_ind) > 0), "No samples to choose from for class {:d}".format(curr_cls)
+            assert (exemplars_per_class <= len(cls_ind)), "Not enough samples to store"
+            # select the exemplars randomly
+            result.extend(random.sample(list(cls_ind), exemplars_per_class))
+        return result
+
+    def _get_labels(self, sel_loader):
+        if hasattr(sel_loader.dataset, 'labels'):  # BaseDataset, MemoryDataset
+            labels = np.asarray(sel_loader.dataset.labels)
+        elif isinstance(sel_loader.dataset, ConcatDataset):
+            labels = []
+            for ds in sel_loader.dataset.datasets:
+                labels.extend(ds.labels)
+            labels = np.array(labels)
+        else:
+            raise RuntimeError("Unsupported dataset: {}".format(sel_loader.dataset.__class__.__name__))
+        return labels
+    
+    def __call__(self, model: LLL_Net, trn_loader: DataLoader, transform):
+        clock0 = time.time()
+        exemplars_per_class = self._exemplars_per_class_num(model)
+        with override_dataset_transform(trn_loader.dataset, transform) as ds_for_selection:
+            # change loader and fix to go sequentially (shuffle=False), keeps same order for later, eval transforms
+            sel_loader = DataLoader(ds_for_selection, batch_size=trn_loader.batch_size, shuffle=False,
+                                    num_workers=trn_loader.num_workers, pin_memory=trn_loader.pin_memory)
+            selected_indices = self._select_indices(model, sel_loader, exemplars_per_class, transform)
+        with override_dataset_transform(trn_loader.dataset, Lambda(lambda x: np.array(x))) as ds_for_raw:
+            x1, x2, y = zip(*(ds_for_raw[idx] for idx in selected_indices))
+        clock1 = time.time()
+        print('| Selected {:d} train exemplars, time={:5.1f}s'.format(len(x1), clock1 - clock0))
+        return x1, x2, y
+
 
 class HerdingExemplarsSelector(ExemplarsSelector):
     """Selection of new samples. This is based on herding selection, which produces a sorted list of samples of one
