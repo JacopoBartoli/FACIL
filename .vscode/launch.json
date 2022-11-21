@@ -1,0 +1,34 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Current File",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "args": ["--datasets", "cifar100",
+             "--network", "compact_convolutional_transformer",
+             "--approach", "icarl_adamW",
+             "--nepochs", "3",
+             "--log", "disk",
+             "--batch-size", "64",
+             "--gpu", "1",
+             "--exp-name", "debugging",
+             "--lr", "0.00001",
+             "--lr-min","0.000001",
+             "--seed", "123",
+             "--lr-patience", "15",
+             "--warmup-nepochs","0",
+             "--warmup-lr-factor", "10",
+             "--num-tasks", "10",
+             "--nc-first-task", "10",
+             "--num-exemplars", "500",
+             "--cls-analysis"]
+        }
+    ]
+}
