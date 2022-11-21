@@ -259,6 +259,8 @@ class CCT(Module):
                  *args, **kwargs):
         super(CCT, self).__init__()
 
+        self.embedding_dim = embedding_dim
+
         self.tokenizer = Tokenizer(n_input_channels=n_input_channels,
                                    n_output_channels=embedding_dim,
                                    kernel_size=kernel_size,
@@ -287,9 +289,8 @@ class CCT(Module):
             num_classes=num_classes,
             positional_embedding=positional_embedding
         )
-
         
-        # last classifier layer (head) with as many outputs as classes
+        # Last classifier layer (head) with as many outputs as classes
         self.fc = Linear(embedding_dim, num_classes)
         # and `head_var` with the name of the head, so it can be removed when doing incremental learning experiments
         self.head_var = 'fc'

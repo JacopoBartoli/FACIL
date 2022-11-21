@@ -248,7 +248,7 @@ def main(argv=None):
             appr._task_size = ncla
             appr._n_classes += ncla
 
-        if 'contrastive_fc' in args.approach:
+        if 'proto' in args.approach:
             appr._n_classes += ncla
         
         # GridSearch
@@ -354,10 +354,6 @@ def main(argv=None):
             weights, biases = last_layer_analysis(net.heads, t, taskcla, y_lim=True, sort_weights=True)
             logger.log_figure(name='weights', iter=t, figure=weights)
             logger.log_figure(name='bias', iter=t, figure=biases)
-
-    if args.cls_analysis:
-        weight_list = analyze_heads(model=net)
-        logger.log_result(weight_list, name='heads', step=t)
         
     # Print Summary
     utils.print_summary(acc_taw, acc_tag, forg_taw, forg_tag)
