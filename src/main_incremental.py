@@ -15,7 +15,7 @@ from datasets.dataset_config import dataset_config
 from last_layer_analysis import last_layer_analysis
 from networks import tvmodels, allmodels, set_tvmodel_head_var
 
-from cls_analysis import analyze_cls, analyze_focus, analyze_heads
+from cls_analysis import analyze_cls, analyze_focus
 
 
 def main(argv=None):
