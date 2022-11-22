@@ -28,6 +28,7 @@ class Appr(Inc_Learning_Appr):
 
         # 
         self._n_classes = 0
+        self._old_classes = 0
     @staticmethod
     def exemplars_dataset_class():
         return ContrastiveExemplarsDataset
@@ -44,7 +45,7 @@ class Appr(Inc_Learning_Appr):
                             help='Delta (default=%(default)s)')                
         parser.add_argument('--contrastive-gamma', default=1.0, required=False, type=float,
                             help='Contrastive gamma (default=%(default)s)')                
-        parser.add_argument('--proto-aug', default=False, required=False, type=float,
+        parser.add_argument('--proto-aug', default=False, required=False, type=bool,
                             help='Augmentation of the prototypes (default=%(default)s)')
 
         return parser.parse_known_args(args)
@@ -56,7 +57,7 @@ class Appr(Inc_Learning_Appr):
             params = list(self.model.model.parameters()) + list(self.model.heads[-1].parameters())
         else:
             params = list(self.model.parameters())
-        params = params + list(self.prototypes.parameters())
+        params.append(self.prototypes)
         return torch.optim.AdamW(params, lr=self.lr, weight_decay=self.wd)
     
     def _init_exemplars_loader(self, trn_loader):
@@ -72,7 +73,7 @@ class Appr(Inc_Learning_Appr):
         self.exemplars_iter = iter(self.exemplars_loader)
 
     def _init_learnable_prototypes(self, num_classes=100):
-        self.prototypes = nn.Parameter(torch.randn(num_classes, self.model.model.embedding_dim)).to(self.device)
+        self.prototypes = nn.Parameter(torch.randn((num_classes, self.model.model.embedding_dim), device=self.device, requires_grad=True))
         self.proto_labels = torch.arange(1, 101)
 
 
@@ -95,6 +96,7 @@ class Appr(Inc_Learning_Appr):
         # EXEMPLAR MANAGEMENT -- select training subset
 
         self.exemplars_dataset.collect_exemplars(self.model, collect_loader, val_loader.dataset.transform)
+        self._old_classes = self._n_classes
 
     def train_epoch(self, t, trn_loader):
         """Runs a single epoch"""
@@ -129,9 +131,11 @@ class Appr(Inc_Learning_Appr):
                 contrastive_features = gx
                 contrastive_labels = labels
             
-            if self.proto_aug:
-                augmented_features = self.prototypes[:self._n_classes] + np.random.normal(size=(self._n_classes, self.model.model.embedding_dim))                                
-                contrastive_features = torch.cat((contrastive_features, augmented_features), dim=0)
+            if self.proto_aug and self._old_classes > 0 :
+                normal_noise = torch.from_numpy(np.random.normal(size=(self._old_classes, self.model.model.embedding_dim)))
+                augmented_features = self.prototypes[:self._old_classes] + normal_noise.to(self.device)                         
+                contrastive_features = torch.cat((contrastive_features, augmented_features), dim=0)                                
+                contrastive_features = torch.cat((contrastive_features, self.prototypes[self._old_classes:self._n_classes]), dim=0)
             else:                
                 contrastive_features = torch.cat((contrastive_features, self.prototypes[:self._n_classes]), dim=0)
 
@@ -157,7 +161,7 @@ class Appr(Inc_Learning_Appr):
             self.optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clipgrad)
-            torch.nn.utils.clip_grad_norm_(self.prototypes.parameters(), self.clipgrad)
+            torch.nn.utils.clip_grad_norm_(self.prototypes, self.clipgrad)
             self.optimizer.step()
         print('Loss:{}'.format(loss.item()))
 
@@ -172,7 +176,7 @@ class Appr(Inc_Learning_Appr):
                 outputs, gx = self.model(x1.to(self.device), return_features=True)
 
                 contrastive_features = torch.cat((gx, self.prototypes[:self._n_classes]), dim=0)
-                contra_targets = torch.cat((targets, self.proto_labels[:self._n_classes]), dim=0)
+                contrastive_targets = torch.cat((targets, self.proto_labels[:self._n_classes]), dim=0)
 
                 # Mask passed to the loss to multiply the similarities that involve the portotypes for the contrastive loss
                 offset = contrastive_features.size()[0] - self._n_classes
@@ -180,7 +184,7 @@ class Appr(Inc_Learning_Appr):
                 delta_mask[offset:] *= self.delta
 
                 
-                contrastive = self.contrastive_loss(contrastive_features, targets.to(self.device), self.T, delta_mask.to(self.device))
+                contrastive = self.contrastive_loss(contrastive_features, contrastive_targets.to(self.device), self.T, delta_mask.to(self.device))
                 cross_entropy = self.criterion(t, outputs, targets.to(self.device))
 
                 loss = self.gamma * contrastive + cross_entropy
