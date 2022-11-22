@@ -2,6 +2,7 @@ from random import shuffle
 import torch
 from torch import nn
 from argparse import ArgumentParser
+import numpy as np
 
 from .incremental_learning import Inc_Learning_Appr
 from datasets.exemplars_dataset import ContrastiveExemplarsDataset
@@ -12,12 +13,13 @@ class Appr(Inc_Learning_Appr):
     """Class implementing the finetuning baseline"""
 
     def __init__(self, model, device, nepochs=100, lr=0.05, lr_min=1e-4, lr_factor=3, lr_patience=5, clipgrad=10000, momentum=0, wd=0, multi_softmax=False, wu_nepochs=0, wu_lr_factor=1, fix_bn=False, eval_on_train=False,
-                 logger=None, exemplars_dataset=None, all_outputs=False, T=0.1, delta=2.0, contrastive_gamma=1.0):
+                 logger=None, exemplars_dataset=None, all_outputs=False, T=0.1, delta=2.0, contrastive_gamma=1.0, proto_aug = False):
         super(Appr, self).__init__(model, device, nepochs, lr, lr_min, lr_factor, lr_patience, clipgrad, momentum, wd,
                                    multi_softmax, wu_nepochs, wu_lr_factor, fix_bn, eval_on_train, logger,
                                    exemplars_dataset)
         self.all_out = all_outputs
         self.T = T
+        self.proto_aug = proto_aug
         # Importance of the prototypes in the loss.
         self.delta = delta
         self.gamma = contrastive_gamma
@@ -41,7 +43,9 @@ class Appr(Inc_Learning_Appr):
         parser.add_argument('--delta', default=2.0, required=False, type=float,
                             help='Delta (default=%(default)s)')                
         parser.add_argument('--contrastive-gamma', default=1.0, required=False, type=float,
-                            help='Contrastive gamma (default=%(default)s)')
+                            help='Contrastive gamma (default=%(default)s)')                
+        parser.add_argument('--proto-aug', default=False, required=False, type=float,
+                            help='Augmentation of the prototypes (default=%(default)s)')
 
         return parser.parse_known_args(args)
 
@@ -125,7 +129,12 @@ class Appr(Inc_Learning_Appr):
                 contrastive_features = gx
                 contrastive_labels = labels
             
-            contrastive_features = torch.cat((contrastive_features, self.prototypes[:self._n_classes]), dim=0)
+            if self.proto_aug:
+                augmented_features = self.prototypes[:self._n_classes] + np.random.normal(size=(self._n_classes, self.model.model.embedding_dim))                                
+                contrastive_features = torch.cat((contrastive_features, augmented_features), dim=0)
+            else:                
+                contrastive_features = torch.cat((contrastive_features, self.prototypes[:self._n_classes]), dim=0)
+
             contrastive_labels = torch.cat((contrastive_labels, self.proto_labels[:self._n_classes]), dim=0)
 
             # Mask passed to the loss to multiply the similarities for the contrastive loss
