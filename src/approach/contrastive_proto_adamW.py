@@ -13,7 +13,7 @@ class Appr(Inc_Learning_Appr):
     """Class implementing the finetuning baseline"""
 
     def __init__(self, model, device, nepochs=100, lr=0.05, lr_min=1e-4, lr_factor=3, lr_patience=5, clipgrad=10000, momentum=0, wd=0, multi_softmax=False, wu_nepochs=0, wu_lr_factor=1, fix_bn=False, eval_on_train=False,
-                 logger=None, exemplars_dataset=None, all_outputs=False, T=0.1, delta=2.0, contrastive_gamma=1.0, proto_aug = False):
+                 logger=None, exemplars_dataset=None, all_outputs=False, T=0.1, delta=2.0, contrastive_gamma=1.0, proto_aug = False, accumulation_steps=1):
         super(Appr, self).__init__(model, device, nepochs, lr, lr_min, lr_factor, lr_patience, clipgrad, momentum, wd,
                                    multi_softmax, wu_nepochs, wu_lr_factor, fix_bn, eval_on_train, logger,
                                    exemplars_dataset)
@@ -23,6 +23,10 @@ class Appr(Inc_Learning_Appr):
         # Importance of the prototypes in the loss.
         self.delta = delta
         self.gamma = contrastive_gamma
+
+        # Parameter to activate gradient accumulation. If accumulation_steps > 1 then gradient accumulation is performed.
+        # If is equals to 1 each batch one optimizer pass is performed.
+        self.accumulation_steps = accumulation_steps
 
         self._init_learnable_prototypes()
 
@@ -44,9 +48,11 @@ class Appr(Inc_Learning_Appr):
         parser.add_argument('--delta', default=2.0, required=False, type=float,
                             help='Delta (default=%(default)s)')                
         parser.add_argument('--contrastive-gamma', default=1.0, required=False, type=float,
-                            help='Contrastive gamma (default=%(default)s)')              
-        parser.add_argument('--proto-aug', default=False, required=False, type=bool,
-                            help='Augmentation of the prototypes (default=%(default)s)')
+                            help='Contrastive gamma (default=%(default)s)')                
+        parser.add_argument('--proto-aug', default=False, required=False, type=float,
+                            help='Augmentation of the prototypes (default=%(default)s)')                
+        parser.add_argument('--accumulation-step', default=1, required=False, type=int,
+                            help='Number of step to perform during gradient accumulation (default=%(default)s)')       
 
         return parser.parse_known_args(args)
 
@@ -106,7 +112,7 @@ class Appr(Inc_Learning_Appr):
         if self.fix_bn and t > 0:
             self.model.freeze_bn()
 
-        for x1, x2, targets in trn_loader:
+        for idx, x1, x2, targets in enumerate(trn_loader):
             # Get the exemplars from the reharsal memory
             if len(self.exemplars_dataset) > 0 and t > 0:
                 try:
@@ -159,13 +165,16 @@ class Appr(Inc_Learning_Appr):
 
             loss = self.gamma * contrastive + cross_entropy
 
+            loss = loss / self.accumulation_steps
+
             # Backward
-            self.optimizer.zero_grad()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clipgrad)
-            torch.nn.utils.clip_grad_norm_(self.prototypes, self.clipgrad)
-            self.optimizer.step()
-        print('Loss:{}'.format(loss.item()))
+            # If self.accumulation_steps is > 1, then the gradient accumulation is performed.
+            if ((idx+1) % self.accumulation_steps == 0) or (idx +1 == len(trn_loader)):
+                self.optimizer.zero_grad()
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clipgrad)
+                torch.nn.utils.clip_grad_norm_(self.prototypes.parameters(), self.clipgrad)
+                self.optimizer.step()
 
     def eval(self, t, val_loader):
         """Contains the evaluation code"""
