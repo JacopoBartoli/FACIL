@@ -28,8 +28,9 @@
              "--num-tasks", "10",
              "--nc-first-task", "10",
              "--num-exemplars", "500",             
-            "--proto-aug", "True",
-             "--cls-analysis"]
+             "--proto-aug", "True",
+             "--cls-analysis",
+             "--accumulation-steps", "8"]
         }
     ]
 }

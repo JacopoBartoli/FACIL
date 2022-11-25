@@ -49,9 +49,9 @@ class Appr(Inc_Learning_Appr):
                             help='Delta (default=%(default)s)')                
         parser.add_argument('--contrastive-gamma', default=1.0, required=False, type=float,
                             help='Contrastive gamma (default=%(default)s)')                
-        parser.add_argument('--proto-aug', default=False, required=False, type=float,
+        parser.add_argument('--proto-aug', default=False, required=False, type=bool,
                             help='Augmentation of the prototypes (default=%(default)s)')                
-        parser.add_argument('--accumulation-step', default=1, required=False, type=int,
+        parser.add_argument('--accumulation-steps', default=1, required=False, type=int,
                             help='Number of step to perform during gradient accumulation (default=%(default)s)')       
 
         return parser.parse_known_args(args)
@@ -63,8 +63,7 @@ class Appr(Inc_Learning_Appr):
             params = list(self.model.model.parameters()) + list(self.model.heads[-1].parameters())
         else:
             params = list(self.model.parameters())
-        if self.proto_mode=='learnable':
-            params.append(self.prototypes)
+        params.append(self.prototypes)
         return torch.optim.AdamW(params, lr=self.lr, weight_decay=self.wd)
     
     def _init_exemplars_loader(self, trn_loader):
@@ -112,7 +111,7 @@ class Appr(Inc_Learning_Appr):
         if self.fix_bn and t > 0:
             self.model.freeze_bn()
 
-        for idx, x1, x2, targets in enumerate(trn_loader):
+        for idx, (x1, x2, targets) in enumerate(trn_loader):
             # Get the exemplars from the reharsal memory
             if len(self.exemplars_dataset) > 0 and t > 0:
                 try:
@@ -140,10 +139,13 @@ class Appr(Inc_Learning_Appr):
                 contrastive_labels = labels
             
             if self.proto_aug and self._old_classes > 0 :
-                normal_noise = torch.from_numpy(np.random.normal(size=(self._old_classes, self.model.model.embedding_dim)))
-                augmented_features = self.prototypes[:self._old_classes] + normal_noise.to(self.device)                         
-                contrastive_features = torch.cat((contrastive_features, augmented_features), dim=0)                                
-                contrastive_features = torch.cat((contrastive_features, self.prototypes[self._old_classes:self._n_classes]), dim=0)
+                #normal_noise = torch.from_numpy(np.random.normal(size=(self._old_classes, self.model.model.embedding_dim)))
+                #augmented_features = self.prototypes[:self._old_classes] + normal_noise.to(self.device)
+                normal_noise = torch.from_numpy(np.random.normal(size=(self._n_classes, self.model.model.embedding_dim)))
+                augmented_features = self.prototypes[:self._n_classes] + normal_noise.to(self.device)                         
+                contrastive_features = torch.cat((contrastive_features, augmented_features), dim=0)                               
+                contrastive_features = torch.cat((contrastive_features, self.prototypes[:self._n_classes]), dim=0)                               
+                #contrastive_features = torch.cat((contrastive_features, self.prototypes[self._old_classes:self._n_classes]), dim=0)
             else:                
                 contrastive_features = torch.cat((contrastive_features, self.prototypes[:self._n_classes]), dim=0)
 
@@ -173,7 +175,7 @@ class Appr(Inc_Learning_Appr):
             if ((idx+1) % self.accumulation_steps == 0) or (idx +1 == len(trn_loader)):
                 self.optimizer.zero_grad()
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clipgrad)
-                torch.nn.utils.clip_grad_norm_(self.prototypes.parameters(), self.clipgrad)
+                torch.nn.utils.clip_grad_norm_(self.prototypes, self.clipgrad)
                 self.optimizer.step()
 
     def eval(self, t, val_loader):
