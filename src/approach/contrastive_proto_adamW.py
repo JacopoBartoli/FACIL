@@ -44,7 +44,7 @@ class Appr(Inc_Learning_Appr):
         parser.add_argument('--delta', default=2.0, required=False, type=float,
                             help='Delta (default=%(default)s)')                
         parser.add_argument('--contrastive-gamma', default=1.0, required=False, type=float,
-                            help='Contrastive gamma (default=%(default)s)')                
+                            help='Contrastive gamma (default=%(default)s)')              
         parser.add_argument('--proto-aug', default=False, required=False, type=bool,
                             help='Augmentation of the prototypes (default=%(default)s)')
 
@@ -57,7 +57,8 @@ class Appr(Inc_Learning_Appr):
             params = list(self.model.model.parameters()) + list(self.model.heads[-1].parameters())
         else:
             params = list(self.model.parameters())
-        params.append(self.prototypes)
+        if self.proto_mode=='learnable':
+            params.append(self.prototypes)
         return torch.optim.AdamW(params, lr=self.lr, weight_decay=self.wd)
     
     def _init_exemplars_loader(self, trn_loader):
@@ -74,6 +75,7 @@ class Appr(Inc_Learning_Appr):
 
     def _init_learnable_prototypes(self, num_classes=100):
         self.prototypes = nn.Parameter(torch.randn((num_classes, self.model.model.embedding_dim), device=self.device, requires_grad=True))
+        
         self.proto_labels = torch.arange(1, 101)
 
 
