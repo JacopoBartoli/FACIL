@@ -143,8 +143,7 @@ class Appr(Inc_Learning_Appr):
                 #augmented_features = self.prototypes[:self._old_classes] + normal_noise.to(self.device)
                 normal_noise = torch.from_numpy(np.random.normal(size=(self._n_classes, self.model.model.embedding_dim)))
                 augmented_features = self.prototypes[:self._n_classes] + normal_noise.to(self.device)                         
-                contrastive_features = torch.cat((contrastive_features, augmented_features), dim=0)                               
-                contrastive_features = torch.cat((contrastive_features, self.prototypes[:self._n_classes]), dim=0)                               
+                contrastive_features = torch.cat((contrastive_features, augmented_features), dim=0)                             
                 #contrastive_features = torch.cat((contrastive_features, self.prototypes[self._old_classes:self._n_classes]), dim=0)
             else:                
                 contrastive_features = torch.cat((contrastive_features, self.prototypes[:self._n_classes]), dim=0)
