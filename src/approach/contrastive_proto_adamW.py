@@ -26,6 +26,9 @@ class Appr(Inc_Learning_Appr):
 
         self._init_learnable_prototypes()
 
+        # Define r scale factor. The idea is similar to the r scale factor described by PASS
+        self.r_scale = 0
+
         # 
         self._n_classes = 0
         self._old_classes = 0
@@ -105,6 +108,13 @@ class Appr(Inc_Learning_Appr):
         if self.fix_bn and t > 0:
             self.model.freeze_bn()
 
+        
+        # Set the the r scale value to the starting point.
+        if self.proto_aug and t==0:
+            self.r_scale = 1/(self._n_classes * self.model.model.embedding_dim)
+        elif self.proto_aug and t > 0:
+            self.r_scale = (self._old_classes * self.r_scale) /self._n_classes
+
         for idx, (x1, x2, targets) in enumerate(trn_loader):
             # Get the exemplars from the reharsal memory
             if len(self.exemplars_dataset) > 0 and t > 0:
@@ -133,12 +143,15 @@ class Appr(Inc_Learning_Appr):
                 contrastive_labels = labels
             
             if self.proto_aug and self._old_classes > 0 :
-                #normal_noise = torch.from_numpy(np.random.normal(size=(self._old_classes, self.model.model.embedding_dim)))
-                #augmented_features = self.prototypes[:self._old_classes] + normal_noise.to(self.device)
-                normal_noise = torch.from_numpy(np.random.normal(size=(self._n_classes, self.model.model.embedding_dim)))
-                augmented_features = self.prototypes[:self._n_classes] + normal_noise.to(self.device)                      
-                contrastive_features = torch.cat((contrastive_features, augmented_features), dim=0)                          
-                #contrastive_features = torch.cat((contrastive_features, self.prototypes[self._old_classes:self._n_classes]), dim=0)
+                # This comment is to add gaussian noise during the training of the prototypes.
+                #normal_noise = torch.from_numpy(np.random.normal(size=(self._n_classes, self.model.model.embedding_dim)) * self.r)
+                #augmented_features = self.prototypes[:self._n_classes] + normal_noise.to(self.device)
+                
+                # In this scenario only the old prototypes are augmented.
+                normal_noise = torch.from_numpy(np.random.normal(size=(self._old_classes, self.model.model.embedding_dim)))
+                augmented_features = self.prototypes[:self._old_classes] + normal_noise.to(self.device) * self.r_scale**(1/2)
+                augmented_features = torch.cat((augmented_features, self.prototypes[self._old_classes:self._n_classes]), dim=0)                   
+                contrastive_features = torch.cat((contrastive_features, augmented_features), dim=0)
             else:                
                 contrastive_features = torch.cat((contrastive_features, self.prototypes[:self._n_classes]), dim=0)
 
@@ -149,16 +162,24 @@ class Appr(Inc_Learning_Appr):
             delta_mask = torch.ones((contrastive_features.size()[0]))
             delta_mask[offset:] *= self.delta
 
-            
+                        
 
             contrastive = self.contrastive_loss(contrastive_features, contrastive_labels.to(self.device), self.T, delta_mask.to(self.device))
             
             cross_entropy = self.criterion(t, out, labels.to(self.device))
 
-            if len(self.exemplars_dataset) > 0 and t > 0:
-                cross_entropy += self.criterion(t, ex_out, ex_labels.to(self.device))
 
-            loss = self.gamma * contrastive + cross_entropy
+            if len(self.exemplars_dataset) > 0 and t > 0:
+                past_cross_entropy = self.criterion(t, ex_out, ex_labels.to(self.device))
+
+            # Enforce the classification of the prototypes to the correct values.
+            if self.proto_aug and self._old_classes > 0:
+                proto_cross_entropy = self.criterion(t, augmented_features, self.proto_labels[:self._n_classes].to(self.device))
+            else:
+                proto_cross_entropy = self.criterion(t, self.prototypes[:self._n_classes], self.proto_labels[:self._n_classes].to(self.device))
+
+
+            loss = self.gamma * contrastive + cross_entropy + past_cross_entropy + proto_cross_entropy
 
             # Backward
             self.optimizer.zero_grad()
