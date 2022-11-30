@@ -24,6 +24,11 @@ class Appr(Inc_Learning_Appr):
         self.delta = delta
         self.gamma = contrastive_gamma
 
+        # Coefficient that multiplies the loss of the prototypes cross entropy
+        self.psi = 1
+        # Coefficient that multiplies the loss factor of the past exemplar
+        self.alpha = 1
+
         self._init_learnable_prototypes()
 
         # Define r scale factor. The idea is similar to the r scale factor described by PASS
@@ -179,7 +184,7 @@ class Appr(Inc_Learning_Appr):
                 proto_cross_entropy = self.criterion(t, self.prototypes[:self._n_classes], self.proto_labels[:self._n_classes].to(self.device))
 
 
-            loss = self.gamma * contrastive + cross_entropy + past_cross_entropy + proto_cross_entropy
+            loss = self.gamma * contrastive + cross_entropy + self.alpha * past_cross_entropy + self.psi * proto_cross_entropy
 
             # Backward
             self.optimizer.zero_grad()
@@ -210,7 +215,9 @@ class Appr(Inc_Learning_Appr):
                 contrastive = self.contrastive_loss(contrastive_features, contrastive_targets.to(self.device), self.T, delta_mask.to(self.device))
                 cross_entropy = self.criterion(t, outputs, targets.to(self.device))
 
-                loss = self.gamma * contrastive + cross_entropy
+                proto_cross_entropy = self.criterion(t, self.prototypes[:self._n_classes], self.proto_labels[:self._n_classes].to(self.device))
+
+                loss = self.gamma * contrastive + cross_entropy + self.psi * proto_cross_entropy
 
                 hits_taw, hits_tag = self.calculate_metrics(outputs, targets)
                 # Log
