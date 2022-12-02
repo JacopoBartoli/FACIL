@@ -18,19 +18,18 @@
              "--log", "disk",
              "--batch-size", "8",
              "--gpu", "1",
-             "--exp-name", "debugging",
+             "--exp-name", "DEBUG",
              "--lr", "0.00001",
              "--lr-min","0.000001",
              "--seed", "123",
-             "--lr-patience", "15",
+             "--lr-patience", "10",
              "--warmup-nepochs","0",
              "--warmup-lr-factor", "10",
              "--num-tasks", "10",
              "--nc-first-task", "10",
              "--num-exemplars", "500",             
              "--proto-aug", "True",
-             "--cls-analysis",
-             "--accumulation-steps", "8"]
+             "--cls-analysis"]
         }
     ]
 }

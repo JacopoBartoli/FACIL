@@ -13,28 +13,41 @@ class Appr(Inc_Learning_Appr):
     """Class implementing the finetuning baseline"""
 
     def __init__(self, model, device, nepochs=100, lr=0.05, lr_min=1e-4, lr_factor=3, lr_patience=5, clipgrad=10000, momentum=0, wd=0, multi_softmax=False, wu_nepochs=0, wu_lr_factor=1, fix_bn=False, eval_on_train=False,
-                 logger=None, exemplars_dataset=None, all_outputs=False, T=0.1, delta=2.0, contrastive_gamma=1.0, proto_aug = False):
+                 logger=None, exemplars_dataset=None, all_outputs=False, T=0.1, alpha=0.2, beta=0.3, gamma=0.3, delta=2.0, psi=0.2, proto_aug=False, proto_ce=True):
         super(Appr, self).__init__(model, device, nepochs, lr, lr_min, lr_factor, lr_patience, clipgrad, momentum, wd,
                                    multi_softmax, wu_nepochs, wu_lr_factor, fix_bn, eval_on_train, logger,
                                    exemplars_dataset)
-        self.all_out = all_outputs
-        self.T = T
-        self.proto_aug = proto_aug
-        # Importance of the prototypes in the loss.
-        self.delta = delta
-        self.gamma = contrastive_gamma
+        self.all_out = all_outputs   
 
-        # Coefficient that multiplies the loss of the prototypes cross entropy
-        self.psi = 1
+        # It's better that the sum alpha + beta + gamma + psi equals to 1. So that we have normalized coefficients
+
         # Coefficient that multiplies the loss factor of the past exemplar
-        self.alpha = 1
+        self.alpha = alpha
+        # Coefficient of the loss factor computed on the current task data
+        self.beta = beta
 
+        # Coefficient of the contrastive loss
+        self.gamma = gamma
+        # Importance of the prototypes in the contrastive loss.
+        self.delta = delta
+        # Self temperature scaling of the contrastive loss
+        self.T = T
+
+        # Coefficient that multiplyes the cross entropy computed on the prototypes
+        self.psi = psi
+
+        # Init the learnable prototypes.
         self._init_learnable_prototypes()
 
         # Define r scale factor. The idea is similar to the r scale factor described by PASS
         self.r_scale = 0
+        self.proto_aug = proto_aug
 
-        # 
+        # Activate cross entropy loss on the prototypes. The purpose is force the learnable prototypes to better
+        # represents the input data distribution
+        self.proto_ce = proto_ce
+
+        # Number of classes used for variuos purposes
         self._n_classes = 0
         self._old_classes = 0
     @staticmethod
@@ -48,13 +61,21 @@ class Appr(Inc_Learning_Appr):
         parser.add_argument('--all-outputs', action='store_true', required=False,
                             help='Allow all weights related to all outputs to be modified (default=%(default)s)')
         parser.add_argument('--T', default=0.1, required=False, type=float,
-                            help='Temperature scaling (default=%(default)s)')        
+                            help='Temperature scaling in the contrastive loss (default=%(default)s)')              
+        parser.add_argument('--alpha', default=0.3, required=False, type=float,
+                            help='Coefficient for cross entropy loss on past data (default=%(default)s)')                
+        parser.add_argument('--beta', default=0.3, required=False, type=float,
+                            help='Coefficient for cross entropy loss current task data (default=%(default)s)')                
+        parser.add_argument('--gamma', default=0.3, required=False, type=float,
+                            help='Coefficient for the contrastive loss (default=%(default)s)')        
         parser.add_argument('--delta', default=2.0, required=False, type=float,
-                            help='Delta (default=%(default)s)')                
-        parser.add_argument('--contrastive-gamma', default=1.0, required=False, type=float,
-                            help='Contrastive gamma (default=%(default)s)')                
+                            help='Coefficient for the importance of prototypes in the contrastive loss (default=%(default)s)')
+        parser.add_argument('--psi', default=0.3, required=False, type=float,
+                            help='Coefficient for prototype cross entropy(default=%(default)s)')                
         parser.add_argument('--proto-aug', default=False, required=False, type=bool,
-                            help='Augmentation of the prototypes (default=%(default)s)')    
+                            help='Augmentation of the prototypes (default=%(default)s)')                
+        parser.add_argument('--proto-ce', default=True, required=False, type=bool,
+                            help='Cross entropy loss of the prototypes (default=%(default)s)')     
 
         return parser.parse_known_args(args)
 
@@ -83,7 +104,7 @@ class Appr(Inc_Learning_Appr):
     def _init_learnable_prototypes(self, num_classes=100):
         self.prototypes = nn.Parameter(torch.randn((num_classes, self.model.model.embedding_dim), device=self.device, requires_grad=True))
         
-        self.proto_labels = torch.arange(1, 101)
+        self.proto_labels = torch.arange(0, 100)
 
 
     def train_loop(self, t, trn_loader, val_loader):
@@ -105,6 +126,15 @@ class Appr(Inc_Learning_Appr):
         # EXEMPLAR MANAGEMENT -- select training subset
 
         self.exemplars_dataset.collect_exemplars(self.model, collect_loader, val_loader.dataset.transform)
+
+        # Compute the r_scale value for prototype augmentation like PASS
+        if self.proto_aug:
+            with torch.no_grad():
+                # Covariance of the new classes.
+                covariance = torch.trace(self.conv(self.prototypes[self._old_classes: self._n_classes])) / self.model.model.embedding_dim
+                radius = (1/self._n_classes) * (self._old_classes * self.r_scale**(1/2) + covariance)
+                self.r_scale = radius.item()
+
         self._old_classes = self._n_classes
 
     def train_epoch(self, t, trn_loader):
@@ -112,13 +142,6 @@ class Appr(Inc_Learning_Appr):
         self.model.train()
         if self.fix_bn and t > 0:
             self.model.freeze_bn()
-
-        
-        # Set the the r scale value to the starting point.
-        if self.proto_aug and t==0:
-            self.r_scale = 1/(self._n_classes * self.model.model.embedding_dim)
-        elif self.proto_aug and t > 0:
-            self.r_scale = (self._old_classes * self.r_scale) /self._n_classes
 
         for idx, (x1, x2, targets) in enumerate(trn_loader):
             # Get the exemplars from the reharsal memory
@@ -147,15 +170,12 @@ class Appr(Inc_Learning_Appr):
                 contrastive_features = gx
                 contrastive_labels = labels
             
-            if self.proto_aug and self._old_classes > 0 :
-                # This comment is to add gaussian noise during the training of the prototypes.
-                #normal_noise = torch.from_numpy(np.random.normal(size=(self._n_classes, self.model.model.embedding_dim)) * self.r)
-                #augmented_features = self.prototypes[:self._n_classes] + normal_noise.to(self.device)
-                
+            if self.proto_aug and self._old_classes > 0 :                
                 # In this scenario only the old prototypes are augmented.
                 normal_noise = torch.from_numpy(np.random.normal(size=(self._old_classes, self.model.model.embedding_dim)))
                 augmented_features = self.prototypes[:self._old_classes] + normal_noise.to(self.device) * self.r_scale**(1/2)
-                augmented_features = torch.cat((augmented_features, self.prototypes[self._old_classes:self._n_classes]), dim=0)                   
+                augmented_features = torch.cat((augmented_features, self.prototypes[self._old_classes:self._n_classes]), dim=0)
+
                 contrastive_features = torch.cat((contrastive_features, augmented_features), dim=0)
             else:                
                 contrastive_features = torch.cat((contrastive_features, self.prototypes[:self._n_classes]), dim=0)
@@ -176,15 +196,21 @@ class Appr(Inc_Learning_Appr):
 
             if len(self.exemplars_dataset) > 0 and t > 0:
                 past_cross_entropy = self.criterion(t, ex_out, ex_labels.to(self.device))
+            else: 
+                past_cross_entropy = 0
+
 
             # Enforce the classification of the prototypes to the correct values.
-            if self.proto_aug and self._old_classes > 0:
-                proto_cross_entropy = self.criterion(t, augmented_features, self.proto_labels[:self._n_classes].to(self.device))
+            if self.proto_ce:
+                if self.proto_aug and self._old_classes > 0:
+                    proto_cross_entropy = self.prototype_loss(t, augmented_features, self.proto_labels[:self._n_classes])
+                else:
+                    proto_cross_entropy = self.prototype_loss(t, self.prototypes[:self._n_classes], self.proto_labels[:self._n_classes])
             else:
-                proto_cross_entropy = self.criterion(t, self.prototypes[:self._n_classes], self.proto_labels[:self._n_classes].to(self.device))
+                proto_cross_entropy = 0
 
 
-            loss = self.gamma * contrastive + cross_entropy + self.alpha * past_cross_entropy + self.psi * proto_cross_entropy
+            loss = self.alpha * past_cross_entropy + self.beta * cross_entropy + self.gamma * contrastive +  + self.psi * proto_cross_entropy
 
             # Backward
             self.optimizer.zero_grad()
@@ -215,9 +241,10 @@ class Appr(Inc_Learning_Appr):
                 contrastive = self.contrastive_loss(contrastive_features, contrastive_targets.to(self.device), self.T, delta_mask.to(self.device))
                 cross_entropy = self.criterion(t, outputs, targets.to(self.device))
 
-                proto_cross_entropy = self.criterion(t, self.prototypes[:self._n_classes], self.proto_labels[:self._n_classes].to(self.device))
+                
+                proto_cross_entropy = self.prototype_loss(t, self.prototypes[:self._n_classes], self.proto_labels[:self._n_classes])
 
-                loss = self.gamma * contrastive + cross_entropy + self.psi * proto_cross_entropy
+                loss = self.beta * cross_entropy + self.gamma * contrastive +  self.psi * proto_cross_entropy
 
                 hits_taw, hits_tag = self.calculate_metrics(outputs, targets)
                 # Log
@@ -263,4 +290,20 @@ class Appr(Inc_Learning_Appr):
         supervised_contrastive_loss = torch.mean(supervised_contrastive_loss_per_sample)
 
         return supervised_contrastive_loss
+
+    def prototype_loss(self, t, prototypes, targets):
+        out = []
+        for head in self.model.heads:
+            out.append(head(prototypes.float()))
+
+        cross_entropy = self.criterion(t, out, targets.to(self.device))
+
+        return cross_entropy
+
+    def cov(self, X):
+        D = X.shape[-1]
+        mean = torch.mean(X, dim=-1).unsqueeze(-1)
+        X = X - mean
+        return 1/(D-1) * X @ X.transpose(-1, -2)
+            
         
