@@ -37,10 +37,9 @@ def analyze_cls(model, device, test_loader, contrastive = False):
     #prediction_list = np.asarray(prediction_list)
     return cls_list, targets_list#, prediction_list
 
-def analyze_focus(model, n_classes):
+def analyze_prototypes(appr, n_classes):
     prototype_list = []
-    prototype = model.model.learnable_focuses.data.cpu().numpy()
-    prototype = prototype[:n_classes]
+    prototype = appr.prototypes[:n_classes].cpu().numpy()
     for item in prototype:
         prototype_list.append(item.reshape((-1)))
     
