@@ -131,7 +131,7 @@ class Appr(Inc_Learning_Appr):
         if self.proto_aug:
             with torch.no_grad():
                 # Covariance of the new classes.
-                covariance = torch.trace(self.conv(self.prototypes[self._old_classes: self._n_classes])) / self.model.model.embedding_dim
+                covariance = torch.trace(self.cov(self.prototypes[self._old_classes: self._n_classes])) / self.model.model.embedding_dim
                 radius = (1/self._n_classes) * (self._old_classes * self.r_scale**(1/2) + covariance)
                 self.r_scale = radius.item()
 

@@ -15,7 +15,7 @@ from datasets.dataset_config import dataset_config
 from last_layer_analysis import last_layer_analysis
 from networks import tvmodels, allmodels, set_tvmodel_head_var
 
-from cls_analysis import analyze_cls, analyze_focus
+from cls_analysis import analyze_cls, analyze_prototypes
 
 
 def main(argv=None):
@@ -318,12 +318,12 @@ def main(argv=None):
             logger.log_result(list_cls, name='cls'+str(t), step=t)
             logger.log_result(list_tgs, name='targets'+str(t), step=t)
 
-            if 'contrastive_fc' in args.approach:
-                focuses = analyze_focus(model=net, n_classes=appr._n_classes)
-                list_focuses.append(focuses)
-                out_shape = len(list_focuses[0][0])
-                list_focuses = np.array([elem for sl in list_focuses for elem in sl]).reshape(-1, out_shape)
-                logger.log_result(list_focuses, name='focuses'+str(t), step=t)
+            if 'proto' in args.approach:
+                prototypes = analyze_prototypes(appr=appr, n_classes=appr._n_classes)
+                list_prototypes.append(prototypes)
+                out_shape = len(list_prototypes[0][0])
+                list_prototypes = np.array([elem for sl in list_prototypes for elem in sl]).reshape(-1, out_shape)
+                logger.log_result(list_prototypes, name='focuses'+str(t), step=t)
 
         
 
