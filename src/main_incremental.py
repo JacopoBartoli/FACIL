@@ -241,7 +241,11 @@ def main(argv=None):
         print('*' * 108)
 
         # Add head for current task
-        net.add_head(taskcla[t][1])
+        if 'pass' in args.approach:
+            net.add_head(4 * taskcla[t][1])
+            appr.new_classes = ncla
+        else:
+            net.add_head(taskcla[t][1])
         net.to(device)
 
         if 'olwf_asym' in args.approach:
@@ -280,7 +284,7 @@ def main(argv=None):
 
         list_cls = []
         list_tgs = []
-        list_focuses = []
+        list_prototypes = []
         # Test
         for u in range(t + 1):
             test_loss, acc_taw[t, u], acc_tag[t, u] = appr.eval(u, tst_loader[u])
@@ -323,7 +327,11 @@ def main(argv=None):
                 list_prototypes.append(prototypes)
                 out_shape = len(list_prototypes[0][0])
                 list_prototypes = np.array([elem for sl in list_prototypes for elem in sl]).reshape(-1, out_shape)
-                logger.log_result(list_prototypes, name='focuses'+str(t), step=t)
+                logger.log_result(list_prototypes, name='prototypes'+str(t), step=t)
+            
+            if 'pass' in args.approach:
+                prototypes = np.asarray(appr.prototype[:appr.old_class])
+                logger.log_result(prototypes, name='prototypes'+str(t), step=t)
 
         
 

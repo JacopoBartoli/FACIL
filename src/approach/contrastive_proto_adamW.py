@@ -20,6 +20,8 @@ class Appr(Inc_Learning_Appr):
         self.all_out = all_outputs   
 
         # It's better that the sum alpha + beta + gamma + psi equals to 1. So that we have normalized coefficients
+        # Beta + Gamma represent the importance of the new knowledge for the model
+        # Alpha + Psi represent the importance of the old knowledge instead
 
         # Coefficient that multiplies the loss factor of the past exemplar
         self.alpha = alpha

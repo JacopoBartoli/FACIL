@@ -34,12 +34,22 @@ dataset_config = {
         'flip': True,
         'normalize': ((0.5071, 0.4866, 0.4409), (0.2009, 0.1984, 0.2023))
     },
+    'cifar100_pass': {
+        'path': join(_BASE_DATA_PATH, 'cifar100'),
+        'resize': None,
+        'pad': 4,
+        'crop': 32,
+        'flip': True,
+        'color_jitter':0.24705882352941178,
+        'normalize': ((0.5071, 0.4866, 0.4409), (0.2009, 0.1984, 0.2023))
+    },
     'cifar100_contrastive': {
         'path': join(_BASE_DATA_PATH, 'cifar100'),
         'resize': None,
         'pad': 4,
         'crop': 32,
         'flip': True,
+        'color_jitter': None,
         'random_grayscale': 0.2,
         'gaussian_blur': 3,
         'random_jitter_p': 0.8,

@@ -112,4 +112,3 @@ def resnet32(pretrained=False, **kwargs):
     # change n=3 for ResNet-20, and n=9 for ResNet-56
     n = 5
     model = ResNet(BasicBlock, [n, n, n], **kwargs)
-    return model

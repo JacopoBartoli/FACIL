@@ -39,14 +39,14 @@ def analyze_cls(model, device, test_loader, contrastive = False):
 
 def analyze_prototypes(appr, n_classes):
     prototype_list = []
-    prototype = appr.prototypes[:n_classes].cpu().numpy()
+    prototype = appr.prototypes[:n_classes].clone().detach().cpu().numpy()
     for item in prototype:
         prototype_list.append(item.reshape((-1)))
     
     prototype_list = np.asarray(prototype_list)
 
     return prototype_list
-
+    
 def analyze_heads(model):
     weights_list = []
     heads = model.heads

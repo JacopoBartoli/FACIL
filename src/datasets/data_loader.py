@@ -32,6 +32,7 @@ def get_loaders(datasets, num_tasks, nc_first_task, batch_size, num_workers, pin
                                                       extend_channel=dc['extend_channel'],
                                                       random_grayscale=dc['random_grayscale'],
                                                       random_jitter_p=dc['random_jitter_p'],
+                                                      color_jitter=dc['color_jitter'],
                                                       gaussian_blur=dc['gaussian_blur'])
 
         # datasets
@@ -186,7 +187,7 @@ def get_datasets(dataset, path, num_tasks, nc_first_task, validation, trn_transf
     return trn_dset, val_dset, tst_dset, taskcla
 
 
-def get_transforms(resize, pad, crop, flip, normalize, extend_channel, random_grayscale, random_jitter_p, gaussian_blur):
+def get_transforms(resize, pad, crop, flip, normalize, extend_channel, random_grayscale, random_jitter_p, color_jitter, gaussian_blur):
     """Unpack transformations and apply to train or test splits"""
 
     trn_transform_list = []
@@ -220,6 +221,9 @@ def get_transforms(resize, pad, crop, flip, normalize, extend_channel, random_gr
                                         contrast=0.5,
                                         saturation=0.5,
                                         hue=0.1)], random_jitter_p))
+    if color_jitter is not None:
+        trn_transform_list.append(transforms.ColorJitter(brightness=color_jitter))
+
     # flips
     if flip:
         trn_transform_list.append(transforms.RandomHorizontalFlip())
