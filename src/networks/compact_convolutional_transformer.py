@@ -314,3 +314,18 @@ def compact_convolutional_transformer(pretrained=False, **kwargs):
             n_conv_layers=1,
             depth=7,**kwargs) 
     return model
+
+def compact_convolutional_transformer_small(pretrained=False, **kwargs):
+    if pretrained:
+        raise NotImplementedError
+    model = CCT(num_classes=100,
+            embedding_dim=768,
+            img_size=32,
+            num_heads = 4,
+            mlp_dim = 2048,
+            channels=3, 
+            dropout=0.1,
+            kernel_size=3,
+            n_conv_layers=2,
+            depth=2,**kwargs) 
+    return model 
