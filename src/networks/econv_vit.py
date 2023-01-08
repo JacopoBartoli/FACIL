@@ -4,7 +4,7 @@ import torch
 from einops import rearrange, repeat
 from einops.layers.torch import Rearrange
 
-__all__ = ['econv_vit_focus']
+__all__ = ['econv_vit']
 
 # classes
 class PreNorm(nn.Module):
@@ -29,7 +29,7 @@ class FeedForward(nn.Module):
         return self.net(x)
 
 class Attention(nn.Module):
-    def __init__(self, dim, heads=7, dim_head=64, dropout=0.1):
+    def __init__(self, dim, heads=7, dim_head=64, dropout=0.1, ext_attn=False, num_patches=5):
         """
         reduced the default number of heads by 1 per https://arxiv.org/pdf/2106.14881v2.pdf
         """
@@ -41,7 +41,14 @@ class Attention(nn.Module):
         self.scale = dim_head ** -0.5
 
         self.attend = nn.Softmax(dim = -1)
-        self.to_qvk = nn.Linear(dim, inner_dim * 3, bias = False)
+
+        self.ext_attn = ext_attn
+        if self.ext_attn:
+            self.to_qvk = nn.Linear(dim, inner_dim * 2, bias = False)
+            self.ext_k = nn.Parameter(torch.randn(1, heads, num_patches, dim_head))            
+            self.ext_bias = nn.Parameter(torch.randn(1, heads, num_patches, num_patches))
+        else:   
+            self.to_qvk = nn.Linear(dim, inner_dim * 3, bias = False)
 
         self.to_out = nn.Sequential(
             nn.Linear(inner_dim, dim),
@@ -50,11 +57,16 @@ class Attention(nn.Module):
 
 
     def forward(self, x):
-     
-        qvk = self.to_qvk(x).chunk(3, dim = -1)
-        q, v, k = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = self.heads), qvk)
 
-        dots = torch.matmul(q, self.k.transpose(-1, -2)) * self.scale
+        if self.ext_attn:
+            qv = self.to_qvk(x).chunk(2, dim = -1)
+            q,v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = self.heads), qv)
+            dots = (torch.matmul(q, self.ext_k.transpose(-1, -2)) + self.ext_bias) * self.scale
+
+        else:          
+            qvk = self.to_qvk(x).chunk(3, dim = -1)
+            q, v, k = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = self.heads), qvk)
+            dots = torch.matmul(q, k.transpose(-1, -2)) * self.scale
 
         attn = self.attend(dots)
 
@@ -64,12 +76,12 @@ class Attention(nn.Module):
         return self.to_out(out)
 
 class Transformer(nn.Module):
-    def __init__(self, dim, depth, heads, dim_head, mlp_dim, dropout = 0.1):
+    def __init__(self, dim, depth, heads, dim_head, mlp_dim, dropout = 0.1, ext_attn=False, num_patches=5):
         super().__init__()
         self.layers = nn.ModuleList([])
         for _ in range(depth):
             self.layers.append(nn.ModuleList([
-                PreNorm(dim, Attention(dim, heads=heads, dim_head=dim_head, dropout=dropout)),
+                PreNorm(dim, Attention(dim, heads=heads, dim_head=dim_head, dropout=dropout, ext_attn=ext_attn, num_patches=num_patches)),
                 PreNorm(dim, FeedForward(dim, mlp_dim, dropout = dropout))
             ]))
     def forward(self, x):
@@ -80,7 +92,8 @@ class Transformer(nn.Module):
 
 class Econv_vit(nn.Module):
     
-    def __init__(self, *, num_classes, dim, depth, heads, mlp_dim, projection_dim, pool='cls', channels=3, dim_head=64, dropout=0.1, emb_dropout=0.1):
+    def __init__(self, *, num_classes, dim, depth, heads, mlp_dim, projection_dim=0, pool='cls', channels=3, dim_head=64, dropout=0.1, emb_dropout=0.1,
+    ext_attn=False):
         """
         3x3 conv, stride 1, 5 conv layers per https://arxiv.org/pdf/2106.14881v2.pdf
 
@@ -112,7 +125,11 @@ class Econv_vit(nn.Module):
         self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
         self.dropout = nn.Dropout(emb_dropout)
 
-        self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim, dropout)
+        #hardcoding
+        x = self.conv_layers(torch.zeros(1,3,32,32))
+        _, n, _ = x.shape
+
+        self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim, dropout, ext_attn, n+1)
 
         """
         self.projection_head = nn.Sequential(
@@ -157,5 +174,18 @@ def econv_vit(pretrained=False, **kwargs):
             heads=8,
             mlp_dim = 2048,
             channels=3,
+            **kwargs)
+    return model
+
+def econv_vit_ext_attn(pretrained=False, **kwargs):
+    if pretrained:
+        raise NotImplementedError
+    model = Econv_vit(dim=768,
+            num_classes=100,
+            depth=12,
+            heads=8,
+            mlp_dim = 2048,
+            channels=3,
+            ext_attn=True,
             **kwargs)
     return model

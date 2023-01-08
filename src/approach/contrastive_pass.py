@@ -59,7 +59,7 @@ class Appr(Inc_Learning_Appr):
         parser.add_argument('--proto-con', type=bool, required=False, default=True,
                             help='Allow to use unsupervised contrastive loss (default=%(default)s)')
         
-        parser.add_argument('--learnable-porto', action='store_true', required=False,
+        parser.add_argument('--learnable-proto', action='store_true', required=False,
                             help='Allow to use unsupervised contrastive loss (default=%(default)s)')
         return parser.parse_known_args(args)
 
@@ -114,14 +114,14 @@ class Appr(Inc_Learning_Appr):
             valid_loss, valid_acc, _ = self.eval(t, val_loader)
             clock4 = time.time()
             print(' Valid: time={:5.1f}s loss={:.3f}, TAw acc={:5.1f}% |'.format(
-                clock4 - clock3, valid_loss, 100 * valid_acc), end='')
+                clock4 - clock3, valid_loss, 100 * valid_acc), end='\n')
             self.logger.log_scalar(task=t, iter=e + 1, name="loss", value=valid_loss, group="valid")
             self.logger.log_scalar(task=t, iter=e + 1, name="acc", value=100 * valid_acc, group="valid")
 
             # Adapt learning rate - patience scheme - early stopping regularization
             if valid_loss < best_loss:
                 best_loss = valid_loss
-                print(' *', end='')
+                print(' *', end='\n')
 
     def train_epoch(self, t, trn_loader):
         """Runs a single epoch"""

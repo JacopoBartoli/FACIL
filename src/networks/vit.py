@@ -33,7 +33,7 @@ class FeedForward(nn.Module):
         return self.net(x)
 
 class Attention(nn.Module):
-    def __init__(self, dim, heads = 8, dim_head = 64, dropout = 0.):
+    def __init__(self, dim, heads = 8, dim_head = 64, dropout = 0., ext_attn=False, num_patches=64):
         super().__init__()
         inner_dim = dim_head *  heads
         project_out = not (heads == 1 and dim_head == dim)
@@ -44,7 +44,13 @@ class Attention(nn.Module):
         self.attend = nn.Softmax(dim = -1)
         self.dropout = nn.Dropout(dropout)
 
-        self.to_qkv = nn.Linear(dim, inner_dim * 3, bias = False)
+        self.ext_attn = ext_attn
+        if self.ext_attn:
+            self.to_qvk = nn.Linear(dim, inner_dim * 2, bias = False)
+            self.ext_k = nn.Parameter(torch.randn(1, heads, num_patches, dim_head))            
+            self.ext_bias = nn.Parameter(torch.randn(1, heads, num_patches, num_patches))
+        else:   
+            self.to_qvk = nn.Linear(dim, inner_dim * 3, bias = False)
 
         self.to_out = nn.Sequential(
             nn.Linear(inner_dim, dim),
@@ -52,10 +58,15 @@ class Attention(nn.Module):
         ) if project_out else nn.Identity()
 
     def forward(self, x):
-        qkv = self.to_qkv(x).chunk(3, dim = -1)
-        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = self.heads), qkv)
+        if self.ext_attn:
+            qv = self.to_qvk(x).chunk(2, dim = -1)
+            q,v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = self.heads), qv)
+            dots = (torch.matmul(q, self.ext_k.transpose(-1, -2)) + self.ext_bias) * self.scale
 
-        dots = torch.matmul(q, k.transpose(-1, -2)) * self.scale
+        else:          
+            qvk = self.to_qvk(x).chunk(3, dim = -1)
+            q, v, k = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = self.heads), qvk)
+            dots = torch.matmul(q, k.transpose(-1, -2)) * self.scale
 
         attn = self.attend(dots)
         attn = self.dropout(attn)
@@ -65,12 +76,12 @@ class Attention(nn.Module):
         return self.to_out(out)
 
 class Transformer(nn.Module):
-    def __init__(self, dim, depth, heads, dim_head, mlp_dim, dropout = 0.):
+    def __init__(self, dim, depth, heads, dim_head, mlp_dim, dropout = 0., ext_attn=False, num_patches=64):
         super().__init__()
         self.layers = nn.ModuleList([])
         for _ in range(depth):
             self.layers.append(nn.ModuleList([
-                PreNorm(dim, Attention(dim, heads = heads, dim_head = dim_head, dropout = dropout)),
+                PreNorm(dim, Attention(dim, heads = heads, dim_head = dim_head, dropout = dropout, ext_attn=ext_attn, num_patches=num_patches)),
                 PreNorm(dim, FeedForward(dim, mlp_dim, dropout = dropout))
             ]))
     def forward(self, x):
@@ -80,7 +91,8 @@ class Transformer(nn.Module):
         return x
 
 class ViT(nn.Module):
-    def __init__(self, *, image_size, patch_size, num_classes, dim, depth, heads, mlp_dim, pool = 'cls', channels = 3, dim_head = 64, dropout = 0., emb_dropout = 0.):
+    def __init__(self, *, image_size, patch_size, num_classes, dim, depth, heads, mlp_dim, pool = 'cls', channels = 3, dim_head = 64, dropout = 0., emb_dropout = 0.
+    ,ext_attn=False):
         super().__init__()
         image_height, image_width = pair(image_size)
         patch_height, patch_width = pair(patch_size)
@@ -100,7 +112,7 @@ class ViT(nn.Module):
         self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
         self.dropout = nn.Dropout(emb_dropout)
 
-        self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim, dropout)
+        self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim, dropout, ext_attn, num_patches+1)
 
         self.pool = pool
         self.to_latent = nn.Identity()
@@ -134,5 +146,30 @@ def vit(pretrained=False, **kwargs):
         dim=768, 
         depth=12, 
         heads=12, 
+        mlp_dim=2048)              
+    return model
+
+def vit_small(pretrained=False, **kwargs):
+    if pretrained:
+        raise NotImplementedError
+    model = ViT(image_size=32,
+        patch_size=4, 
+        num_classes=100, 
+        dim=768, 
+        depth=7, 
+        heads=8, 
+        mlp_dim=2048)              
+    return model
+
+def vit_small_ext_attn(pretrained=False, **kwargs):
+    if pretrained:
+        raise NotImplementedError
+    model = ViT(image_size=32,
+        patch_size=4, 
+        num_classes=100, 
+        dim=768, 
+        depth=7, 
+        heads=8,
+        ext_attn=True,
         mlp_dim=2048)              
     return model

@@ -3,7 +3,9 @@ from torchvision import models
 from .lenet import LeNet
 from .vggnet import VggNet
 from .resnet32 import resnet32
-from .compact_convolutional_transformer import compact_convolutional_transformer
+from .econv_vit import econv_vit, econv_vit_ext_attn
+from .vit import vit, vit_small, vit_small_ext_attn
+from .compact_convolutional_transformer import compact_convolutional_transformer, compact_convolutional_transformer_small
 
 # available torchvision models
 tvmodels = ['alexnet',
@@ -18,7 +20,10 @@ tvmodels = ['alexnet',
             'wide_resnet50_2', 'wide_resnet101_2'
             ]
 
-allmodels = tvmodels + ['resnet32', 'LeNet', 'VggNet', 'compact_convolutional_transformer']
+allmodels = tvmodels + ['resnet32', 'LeNet', 'VggNet', 
+                        'compact_convolutional_transformer', 'compact_convolutional_transformer_small', 
+                        'econv_vit', 'econv_vit_ext_attn',
+                         'vit', 'vit_small', 'vit_small_ext_attn']
 
 
 def set_tvmodel_head_var(model):

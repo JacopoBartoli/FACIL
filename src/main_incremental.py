@@ -305,7 +305,9 @@ def main(argv=None):
 
             # Log the cls representation for the test set.
             if args.cls_analysis:
-                if 'contrastive' in args.approach:
+                if 'contrastive_pass' in args.approach:
+                    cls, targets = analyze_cls(model=net, device=device, test_loader=tst_loader[u], contrastive = False)
+                elif 'contrastive' in args.approach:
                     cls, targets = analyze_cls(model=net, device=device, test_loader=tst_loader[u], contrastive = True)
                 else:
                     cls, targets = analyze_cls(model=net, device=device, test_loader=tst_loader[u], contrastive = False)
