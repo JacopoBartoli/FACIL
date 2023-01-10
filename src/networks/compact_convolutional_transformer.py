@@ -85,23 +85,38 @@ class Attention(Module):
     Obtained from timm: github.com:rwightman/pytorch-image-models
     """
 
-    def __init__(self, dim, num_heads=8, attention_dropout=0.1, projection_dropout=0.1):
+    def __init__(self, dim, num_heads=8, attention_dropout=0.1, projection_dropout=0.1, sequence_length=16, ext_attn = False):
         super().__init__()
         self.num_heads = num_heads
-        head_dim = dim // self.num_heads
-        self.scale = head_dim ** -0.5
+        self.head_dim = dim // self.num_heads
+        self.sequence_length = sequence_length
+        self.scale = self.head_dim ** -0.5
 
-        self.qkv = Linear(dim, dim * 3, bias=False)
+        #self.qkv = Linear(dim, dim * 3, bias=False)
         self.attn_drop = Dropout(attention_dropout)
         self.proj = Linear(dim, dim)
         self.proj_drop = Dropout(projection_dropout)
+        
+        self.ext_attn = ext_attn
+        if self.ext_attn:
+            self.qkv = Linear(dim, dim * 2, bias = False)
+            self.ext_k = Parameter(torch.randn(1, num_heads, sequence_length, self.head_dim))            
+            self.ext_bias = Parameter(torch.randn(1, num_heads, sequence_length, sequence_length))
+        else:   
+            self.qkv = Linear(dim, dim * 3, bias = False)
 
     def forward(self, x):
         B, N, C = x.shape
-        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
-        q, k, v = qkv[0], qkv[1], qkv[2]
+        if self.ext_attn:
+            qkv = self.qkv(x).reshape(B, N, 2, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
+            q, v = qkv[0], qkv[1]
+            attn = (q @ self.ext_k.transpose(-2, -1)+ self.ext_bias) * self.scale
 
-        attn = (q @ k.transpose(-2, -1)) * self.scale
+        else: 
+            qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
+            q, k, v = qkv[0], qkv[1], qkv[2]
+            attn = (q @ k.transpose(-2, -1)) * self.scale
+
         attn = attn.softmax(dim=-1)
         attn = self.attn_drop(attn)
 
@@ -116,11 +131,11 @@ class TransformerEncoderLayer(Module):
     """
 
     def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1,
-                 attention_dropout=0.1, drop_path_rate=0.1):
+                 attention_dropout=0.1, drop_path_rate=0.1, sequence_length=16, ext_attn = False):
         super(TransformerEncoderLayer, self).__init__()
         self.pre_norm = LayerNorm(d_model)
         self.self_attn = Attention(dim=d_model, num_heads=nhead,
-                                   attention_dropout=attention_dropout, projection_dropout=dropout)
+                                   attention_dropout=attention_dropout, projection_dropout=dropout, sequence_length=sequence_length, ext_attn=ext_attn)
 
         self.linear1 = Linear(d_model, dim_feedforward)
         self.dropout1 = Dropout(dropout)
@@ -151,7 +166,8 @@ class TransformerClassifier(Module):
                  attention_dropout=0.1,
                  stochastic_depth=0.1,
                  positional_embedding='learnable',
-                 sequence_length=None):
+                 sequence_length=None,
+                 ext_attn=False):
         super().__init__()
         positional_embedding = positional_embedding if \
             positional_embedding in ['sine', 'learnable', 'none'] else 'sine'
@@ -189,7 +205,7 @@ class TransformerClassifier(Module):
         self.blocks = ModuleList([
             TransformerEncoderLayer(d_model=embedding_dim, nhead=num_heads,
                                     dim_feedforward=dim_feedforward, dropout=dropout,
-                                    attention_dropout=attention_dropout, drop_path_rate=dpr[i])
+                                    attention_dropout=attention_dropout, drop_path_rate=dpr[i], sequence_length=self.sequence_length, ext_attn = ext_attn)
             for i in range(num_layers)])
         self.norm = LayerNorm(embedding_dim)
         
@@ -256,6 +272,7 @@ class CCT(Module):
                  mlp_ratio=4.0,
                  num_classes=1000,
                  positional_embedding='learnable',
+                 ext_attn = False,
                  *args, **kwargs):
         super(CCT, self).__init__()
 
@@ -287,7 +304,8 @@ class CCT(Module):
             num_heads=num_heads,
             mlp_ratio=mlp_ratio,
             num_classes=num_classes,
-            positional_embedding=positional_embedding
+            positional_embedding=positional_embedding,
+            ext_attn = ext_attn
         )
         
         # Last classifier layer (head) with as many outputs as classes
@@ -328,4 +346,21 @@ def compact_convolutional_transformer_small(pretrained=False, **kwargs):
             kernel_size=3,
             n_conv_layers=2,
             depth=2,**kwargs) 
+    return model 
+
+def compact_convolutional_transformer_small_ext_attn(pretrained=False, **kwargs):
+    if pretrained:
+        raise NotImplementedError
+    model = CCT(num_classes=100,
+            embedding_dim=768,
+            img_size=32,
+            num_heads = 4,
+            mlp_dim = 2048,
+            channels=3, 
+            dropout=0.1,
+            kernel_size=3,
+            n_conv_layers=2,
+            depth=2,
+            ext_attn=True,
+            **kwargs) 
     return model 

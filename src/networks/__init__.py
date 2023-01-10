@@ -5,7 +5,7 @@ from .vggnet import VggNet
 from .resnet32 import resnet32
 from .econv_vit import econv_vit, econv_vit_ext_attn
 from .vit import vit, vit_small, vit_small_ext_attn
-from .compact_convolutional_transformer import compact_convolutional_transformer, compact_convolutional_transformer_small
+from .compact_convolutional_transformer import compact_convolutional_transformer, compact_convolutional_transformer_small, compact_convolutional_transformer_small_ext_attn
 
 # available torchvision models
 tvmodels = ['alexnet',
@@ -21,7 +21,7 @@ tvmodels = ['alexnet',
             ]
 
 allmodels = tvmodels + ['resnet32', 'LeNet', 'VggNet', 
-                        'compact_convolutional_transformer', 'compact_convolutional_transformer_small', 
+                        'compact_convolutional_transformer', 'compact_convolutional_transformer_small', 'compact_convolutional_transformer_small_ext_attn', 
                         'econv_vit', 'econv_vit_ext_attn',
                          'vit', 'vit_small', 'vit_small_ext_attn']
 

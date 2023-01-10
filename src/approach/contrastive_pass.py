@@ -14,7 +14,7 @@ class Appr(Inc_Learning_Appr):
 
     def __init__(self, model, device, nepochs=100, lr=0.05, lr_min=1e-4, lr_factor=3, lr_patience=5, clipgrad=10000,
                  momentum=0, wd=0, multi_softmax=False, wu_nepochs=0, wu_lr_factor=1, fix_bn=False, eval_on_train=False,
-                 logger=None, exemplars_dataset=None, all_outputs=False, unsupervised=False, proto_con = True, learnable_proto=False):
+                 logger=None, exemplars_dataset=None, all_outputs=False, unsupervised=False, proto_con = True, is_cct=False):
         super(Appr, self).__init__(model, device, nepochs, lr, lr_min, lr_factor, lr_patience, clipgrad, momentum, wd,
                                    multi_softmax, wu_nepochs, wu_lr_factor, fix_bn, eval_on_train, logger,
                                    exemplars_dataset)
@@ -34,8 +34,22 @@ class Appr(Inc_Learning_Appr):
         self.unsupervised = unsupervised
         self.proto_con = proto_con
         # To implement.
-        self.learnable_proto = learnable_proto
-        self.ext_params = False
+        # We can consider 3 case, proto initialized by proto save and then learned and maybe distilled.
+        self.save_and_learn = False
+        # Proto learned at the end of a task and then not changed
+        self.learn_and_freeze = False
+        # Proto not initialized by proto save but learned and maybe distilled.
+        self.full_learnable = False
+        if self.full_learnable or self.save_and_learn or self.learn_and_freeze:
+            self.learnable_proto = True
+        else:
+            self.learnable_proto = False
+        if self.learnable_proto:
+            self._init_learnable_prototypes
+
+        # Enanble distillation of external parameter.(Key and Bias)
+        self.ext_params = True
+        self.is_cct = is_cct
 
         # Pass parameters
         self.kd_weight = 10
@@ -59,8 +73,8 @@ class Appr(Inc_Learning_Appr):
         parser.add_argument('--proto-con', type=bool, required=False, default=True,
                             help='Allow to use unsupervised contrastive loss (default=%(default)s)')
         
-        parser.add_argument('--learnable-proto', action='store_true', required=False,
-                            help='Allow to use unsupervised contrastive loss (default=%(default)s)')
+        #parser.add_argument('--learnable-proto', action='store_true', required=False,
+        #                    help='Allow to use unsupervised contrastive loss (default=%(default)s)')
         return parser.parse_known_args(args)
 
     def _get_optimizer(self):
@@ -70,6 +84,8 @@ class Appr(Inc_Learning_Appr):
             params = list(self.model.model.parameters()) + list(self.model.heads[-1].parameters())
         else:
             params = self.model.parameters()
+        if self.learnable_proto:   
+            params.append(self.prototypes)
         return torch.optim.Adam(params, lr=self.lr, weight_decay=self.wd)
 
     def post_train_process(self, t, trn_loader):
@@ -84,6 +100,11 @@ class Appr(Inc_Learning_Appr):
         self.model_old = deepcopy(self.model)
         self.model_old.eval()
         self.model_old.freeze_all()
+
+    def _init_learnable_prototypes(self, num_classes=100):
+        self.prototypes = torch.nn.Parameter(torch.randn((num_classes, self.model.model.embedding_dim), device=self.device, requires_grad=True))
+        
+        self.proto_labels = torch.arange(0, 100)
 
     def train_loop(self, t, trn_loader, val_loader):
         self.batch_size = trn_loader.batch_size
@@ -143,6 +164,8 @@ class Appr(Inc_Learning_Appr):
             self.optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clipgrad)
+            if self.learnable_proto:
+                torch.nn.utils.clip_grad_norm_(self.prototypes, self.clipgrad)
             self.optimizer.step()
         self.scheduler.step()
 
@@ -187,13 +210,45 @@ class Appr(Inc_Learning_Appr):
         loss_cls = self.criterion(t, out.tolist(), target)
         if self.model_old is None:
             if self.unsupervised:
-                loss_supcon = self.unsupervised_contrastive_loss(con_feat)
+                loss_con = self.unsupervised_contrastive_loss(con_feat)
             else:
-                loss_supcon = self.contrastive_loss(con_feat, target, temperature=1)
-            return loss_cls + loss_supcon
+                loss_con = self.contrastive_loss(con_feat, target, temperature=1)
+            return loss_cls + loss_con
         else:
             _, features_old = self.model_old(imgs.to(self.device), return_features=True)
             loss_kd = torch.dist(features, features_old, 2)
+
+            if self.ext_params and not self.is_cct:
+                ext_k, ext_b, ext_k_old, ext_b_old = [], [], [], []
+                # Distillation of external bias and external key.
+                for item, item_old in zip(self.model.model.transformer.layers, self.model_old.model.transformer.layers):
+                    ext_k.append(item[0].fn.ext_k) 
+                    ext_b.append(item[0].fn.ext_bias)
+
+                    ext_k_old.append(item_old[0].fn.ext_k) 
+                    ext_b_old.append(item_old[0].fn.ext_bias)
+
+                ext_k = torch.cat(ext_k, dim=1)
+                ext_b = torch.cat(ext_b, dim=1)
+                ext_k_old = torch.cat(ext_k_old, dim=1)
+                ext_b_old = torch.cat(ext_b_old, dim=1)
+                loss_ext_dist = torch.dist(ext_k, ext_k_old, 2) + torch.dist(ext_b, ext_b_old, 2)
+            elif self.ext_params and self.is_cct:
+                ext_k, ext_b, ext_k_old, ext_b_old = [], [], [], []
+                for item, item_old in zip(self.model.model.classifier.blocks, self.model_old.model.classifier.blocks):
+                    ext_k.append(item.self_attn.ext_k) 
+                    ext_b.append(item.self_attn.ext_bias)
+
+                    ext_k_old.append(item_old.self_attn.ext_k) 
+                    ext_b_old.append(item_old.self_attn.ext_bias)
+
+                ext_k = torch.cat(ext_k, dim=1)
+                ext_b = torch.cat(ext_b, dim=1)
+                ext_k_old = torch.cat(ext_k_old, dim=1)
+                ext_b_old = torch.cat(ext_b_old, dim=1)
+                loss_ext_dist = torch.dist(ext_k, ext_k_old, 2) + torch.dist(ext_b, ext_b_old, 2)
+            else:
+                loss_ext_dist = 0
 
             proto_aug = []
             proto_aug_label = []
@@ -214,18 +269,14 @@ class Appr(Inc_Learning_Appr):
             soft_feat_aug = np.array(soft_feat_aug) / self.temp
             loss_protoAug = self.criterion(t, soft_feat_aug.tolist(), proto_aug_label)
 
-            if not self.unsupervised:
-                if self.proto_con:
-                    con_feat = torch.cat((features, proto_aug), dim=0)
-                    con_target = torch.cat((target, proto_aug_label), dim=0)
-                else:
-                    con_feat = features
-                    con_target = target
-                loss_supcon = self.contrastive_loss(con_feat, con_target, temperature=1)
+            if self.unsupervised:
+                loss_con = self.unsupervised_contrastive_loss(con_feat)
             else:
-                loss_supcon = self.unsupervised_contrastive_loss(con_feat)
+                con_feat = torch.cat((features, proto_aug), dim=0)
+                con_target = torch.cat((target, proto_aug_label), dim=0)
+                loss_con = self.contrastive_loss(con_feat, con_target, temperature=1)
 
-            return loss_cls + self.protoAug_weight*loss_protoAug + self.kd_weight*loss_kd + loss_supcon
+            return loss_cls + self.protoAug_weight*loss_protoAug + self.kd_weight*loss_kd + loss_con + loss_ext_dist
 
     def protoSave(self, current_task, model, loader):
         features = []
