@@ -305,12 +305,7 @@ def main(argv=None):
 
             # Log the cls representation for the test set.
             if args.cls_analysis:
-                if 'contrastive_pass' in args.approach:
-                    cls, targets = analyze_cls(model=net, device=device, test_loader=tst_loader[u], contrastive = False)
-                elif 'contrastive' in args.approach:
-                    cls, targets = analyze_cls(model=net, device=device, test_loader=tst_loader[u], contrastive = True)
-                else:
-                    cls, targets = analyze_cls(model=net, device=device, test_loader=tst_loader[u], contrastive = False)
+                cls, targets = analyze_cls(model=net, device=device, test_loader=tst_loader[u], contrastive = False)
                     
                 list_cls.append(cls)
                 list_tgs.append(targets)
@@ -323,13 +318,6 @@ def main(argv=None):
             list_tgs = np.array([elem for sl in list_tgs for elem in sl]).reshape(-1, 1)
             logger.log_result(list_cls, name='cls'+str(t), step=t)
             logger.log_result(list_tgs, name='targets'+str(t), step=t)
-
-            if 'proto' in args.approach:
-                prototypes = analyze_prototypes(appr=appr, n_classes=appr._n_classes)
-                list_prototypes.append(prototypes)
-                out_shape = len(list_prototypes[0][0])
-                list_prototypes = np.array([elem for sl in list_prototypes for elem in sl]).reshape(-1, out_shape)
-                logger.log_result(list_prototypes, name='prototypes'+str(t), step=t)
             
             if 'pass' in args.approach:
                 prototypes = np.asarray(appr.prototype[:appr.old_class])
